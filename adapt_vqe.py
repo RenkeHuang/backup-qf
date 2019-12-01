@@ -91,7 +91,9 @@ class ADAPT_VQE:
         self.ansatz_op_idx = []
         self.ansatz_fermion_ops = []
         self.energy = []
-
+        self.num_calls_e = []
+        self.num_calls_jac = []
+        self.num_calls_hess = []
 
     def get_qubit_hamitonian(self, docc_indices=None, active_orb_indices=None):
         """ Return Hamiltonian operator as a qforte.QuantumOperator instance
@@ -135,10 +137,12 @@ class ADAPT_VQE:
         """ Call this function to populate jw_ops list and jw_commutators list
         """
         # Singles
-        def add_singles(occ_idx, vir_idx):
+        def add_singles_spin_adapted(occ_idx, vir_idx):
             for i in occ_idx:
                 for a in vir_idx:
-                    single = FermionOperator(((a, 1), (i, 0)))
+                    single = 1 / \
+                        np.sqrt(2) * (FermionOperator(((a, 1), (i, 0))) +
+                                      FermionOperator(((a+1, 1), (i+1, 0))))
                     # 1. build Fermion anti-Hermitian operator
                     single -= hermitian_conjugated(single)
                     # 2. JW transformation to qubit operator
@@ -152,8 +156,7 @@ class ADAPT_VQE:
                     self.jw_ops.append(qf_jw_single)
                     self.jw_commutators.append(qf_commutator)
 
-        add_singles(self.occ_idx_alpha, self.vir_idx_alpha)
-        add_singles(self.occ_idx_beta, self.vir_idx_beta)
+        add_singles_spin_adapted(self.occ_idx_alpha, self.vir_idx_alpha)
                 
         # Doubles
         def add_doubles(occ_idx_pairs, vir_idx_pairs):
@@ -175,15 +178,37 @@ class ADAPT_VQE:
                     self.jw_ops.append(qf_jw_double)
                     self.jw_commutators.append(qf_commutator)
 
+        def add_double_spin_adapted(occ_idx_pairs, vir_idx_pairs):
+            for ji in occ_idx_pairs:
+                for ba in vir_idx_pairs:
+                    j, i = ji
+                    b, a = ba
+
+                    d_a = FermionOperator(F'{a}^ {b}^ {i} {j}')
+                    d_b = FermionOperator(F'{a+1}^ {b+1}^ {i+1} {j+1}')
+                    double = 1/np.sqrt(2) * (d_a + d_b)
+                    double -= hermitian_conjugated(double)
+                    jw_double = jordan_wigner(double)
+                    h_double_commutator = commutator(
+                        self.h_qubit_OF, jw_double)
+
+                    qf_jw_double = qforte.build_from_openfermion(jw_double)
+                    qf_commutator = qforte.build_from_openfermion(
+                        h_double_commutator)
+
+                    self.fermion_ops.append((j, i, b, a))
+                    self.jw_ops.append(qf_jw_double)
+                    self.jw_commutators.append(qf_commutator)
+
+
         from itertools import combinations, product
 
         occ_a_pairs = list(combinations(self.occ_idx_alpha, 2))
         vir_a_pairs = list(combinations(self.vir_idx_alpha, 2))
-        add_doubles(occ_a_pairs, vir_a_pairs)
-
-        occ_b_pairs = list(combinations(self.occ_idx_beta, 2))
-        vir_b_pairs = list(combinations(self.vir_idx_beta, 2))
-        add_doubles(occ_b_pairs, vir_b_pairs)
+        add_double_spin_adapted(occ_a_pairs, vir_a_pairs)
+        # occ_b_pairs = list(combinations(self.occ_idx_beta, 2))
+        # vir_b_pairs = list(combinations(self.vir_idx_beta, 2))
+        # add_doubles(occ_b_pairs, vir_b_pairs)
 
         occ_ab_pairs = list(product(self.occ_idx_alpha, self.occ_idx_beta))
         vir_ab_pairs = list(product(self.vir_idx_alpha, self.vir_idx_beta))
@@ -376,10 +401,12 @@ class ADAPT_VQE:
 
         return result
 
-    def iterating_cycle(self, max_cycle= 100, gradient_norm_threshold = 1e-3, print_details = True):
+    def iterating_cycle(self, max_cycle=100, check_grad=True, gradient_norm_threshold=1e-3, print_details=True):
         print(F'\n    molecule info: {self.molecule.description}')
         print('\n    ================> Start ADAPT-VQE <================\n')
         params = []
+
+        
 
         for i in range(1, max_cycle+1):
             print(F'    ====== ADAPT cycle {i} ======\n')
@@ -390,7 +417,7 @@ class ADAPT_VQE:
 
             norm = np.linalg.norm(gradients_i)
             
-            if norm <= gradient_norm_threshold:
+            if check_grad and norm <= gradient_norm_threshold:
                 print(F'    Norm of gradient vector:  {norm:2.10f}  ......Converged! (norm <= {gradient_norm_threshold})\n')
                 print('    =========> Finish ADAPT-VQE Successfully! <=========\n\n')
                 if print_details:
@@ -402,6 +429,11 @@ class ADAPT_VQE:
                     print(F'ansatz = {self.ansatz_fermion_ops}')
                     print(F'Energy from 1st   ADAPT iteration: {self.energy[0]:.10f} Hartree')
                     print(F'Energy from final ADAPT iteration: {self.energy[-1]:.10f} Hartree')
+                    print(F'#Parameters in wfn = {len(self.energy)}')
+                    # print(F'#Calls to the energy function = {sum(self.num_calls_e)}')
+                    print(F'#Calls to the energy function = {self.num_calls_e}')
+                    print(F'#Calls to the jac (not imple)= {self.num_calls_jac}')
+                    print(F'#Calls to the hessian (not imple))= {self.num_calls_e}')
                     print('\n--- reference ---')
                     print(F'psi4 HF  energy: {self.molecule.hf_energy:.10f} Hartree.')
                     print(F'psi4 FCI energy: {self.molecule.fci_energy:.10f} Hartree.')
@@ -422,7 +454,6 @@ class ADAPT_VQE:
                 self.ansatz_ops.append(A_i)
                 t_i = self.fermion_ops[idx_of_max_grad_i]
                 self.ansatz_fermion_ops.append(t_i)
-
                 """ Test: initial guess of newly-added parameters impacts Convergence!
                 H4, R=0.8; param_i = 0.005 for all i, 14 cycles, 
                 correct op order = [22, 20, 15, 13, 10, 25, 16, 19, 9, 8, 4, 3, 0, 7]   
@@ -431,22 +462,15 @@ class ADAPT_VQE:
                            param_i = 0.0001, 18 cycles,
                                    [22, 15, 20, 13, 10, 25, 19, 16, 8, 9, 0, 7, 4, 3, 13, 4, 4, 4]
                 """
-                # if i < 4:
-                #     param_i = 0.001
-                #     print(
-                #         F'\n  ##  gradients_{i}[{idx_of_max_grad_i}]: {gradients_i[idx_of_max_grad_i]}\n')
-                #     print(F'        gradients_{i}[22]: {gradients_i[22]}\n')
-                #     print(F'        gradients_{i}[20]: {gradients_i[20]}\n')
-                #     print(F'        gradients_{i}[15]: {gradients_i[15]}\n')
-                # else:
-                #     break
-                """ End Test """
-
                 param_i = 0.005
                 params = np.append(params, param_i)
 
-                result = self.variational_optimizer(params, theta=gradient_norm_threshold)
+                result = self.variational_optimizer(params, theta=gradient_norm_threshold, print_level=0)
                 params = result.x
+                self.num_calls_e.append(result.nfev)
+                self.num_calls_jac.append(result.njev)
+                self.num_calls_hess.append(result.nhev)
+                
 
                 energy_i = result.fun
                 self.energy.append(energy_i)
@@ -459,8 +483,9 @@ class ADAPT_VQE:
                 # print(F'    ** Numerical gradient (cycle {i}): {grad_i_numerical}\n\n')
                 
         else: 
-            print(F'Warning: Norm of gradient vector NOT Converge in {max_cycle} cycles! (norm > {gradient_norm_threshold}) ')
-            
+            if check_grad:
+                print(F'Warning: Norm of gradient vector NOT Converge in {max_cycle} cycles! (norm > {gradient_norm_threshold}) ')
+            else:
+                print(F'Run {max_cycle} cycles of ADAPT-VQE!')
             # with 
-
 
