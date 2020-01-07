@@ -1,0 +1,3 @@
+cmake -C /Users/renkehuang/Source/psi4-bin-clang-debug/share/cmake/psi4/psi4PluginCache.cmake -DCMAKE_PREFIX_PATH=/Users/renkehuang/Source/psi4-bin-clang-debug . -Dambit_DIR=/Users/renkehuang/Source/ambit-install/share/cmake/ambit -DMAX_DET_ORB=OFF -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=17 -DENABLE_CODECOV=ON
+
+

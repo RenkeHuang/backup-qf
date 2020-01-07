@@ -1,0 +1,1 @@
+cmake -H. -B/Users/renkehuang/Source/ambit-obj -DCMAKE_INSTALL_PREFIX=/Users/renkehuang/Source/ambit-install -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=17
