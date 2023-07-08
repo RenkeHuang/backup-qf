@@ -1,1 +1,0 @@
-cmake -H. -B/Users/renkehuang/Source/psi4-obj-clang -DCMAKE_INSTALL_PREFIX=/Users/renkehuang/Source/psi4-bin-clang-debug  -DPYTHON_EXECUTABLE=/Users/renkehuang/anaconda3/bin/python -DMAX_AM_ERI=5 -Dpsi4_CXX_STANDARD=17 -DCMAKE_BUILD_TYPE=Debug /Users/renkehuang/Source/psi4
